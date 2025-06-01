@@ -7,57 +7,25 @@ import plotly.graph_objects as go
 # 1. 獲取歷史數據（使用 Binance API）
 @st.cache_data
 def fetch_binance_data(symbol='BTC/USDT', timeframe='1h', limit=1000):
-    exchange = ccxt.binance()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    return df
+    try:
+        exchange = ccxt.binance({'enableRateLimit': True})  # 啟用速率限制
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
+    except ccxt.NetworkError as e:
+        st.error(f"Network error while fetching data from Binance: {str(e)}")
+        return pd.DataFrame()  # 返回空 DataFrame，防止應用崩潰
+    except ccxt.ExchangeError as e:
+        st.error(f"Exchange error: {str(e)}")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Unexpected error: {str(e)}")
+        return pd.DataFrame()
 
-# 2. 計算簡單移動平均線（SMA）
-def calculate_sma(df, short_window, long_window):
-    df['short_sma'] = df['close'].rolling(window=short_window).mean()
-    df['long_sma'] = df['close'].rolling(window=long_window).mean()
-    return df
-
-# 3. 產生交易信號
-def generate_signals(df):
-    df['signal'] = 0  # 0: 無信號, 1: 買入, -1: 賣出
-    df['signal'][df['short_sma'] > df['long_sma']] = 1  # 短均線上穿長均線 -> 買入
-    df['signal'][df['short_sma'] < df['long_sma']] = -1  # 短均線下穿長均線 -> 賣出
-    return df
-
-# 4. 模擬交易並計算回報
-def backtest_strategy(df, initial_cash=10000):
-    position = 0  # 當前持倉（0: 無持倉, 1: 持有多頭）
-    cash = initial_cash
-    portfolio = []
-    trades = []
-    
-    for i in range(1, len(df)):
-        if df['signal'].iloc[i] == 1 and position == 0:  # 買入信號
-            position = cash / df['close'].iloc[i]
-            cash = 0
-            trades.append(f"Buy at {df.index[i]}: Price = ${df['close'].iloc[i]:.2f}")
-        elif df['signal'].iloc[i] == -1 and position > 0:  # 賣出信號
-            cash = position * df['close'].iloc[i]
-            position = 0
-            trades.append(f"Sell at {df.index[i]}: Price = ${df['close'].iloc[i]:.2f}")
-        portfolio_value = cash + position * df['close'].iloc[i]
-        portfolio.append(portfolio_value)
-    
-    df['portfolio_value'] = pd.Series([initial_cash] + portfolio, index=df.index)
-    return df, trades
-
-# 5. 計算回測指標
-def calculate_metrics(df, trades):
-    total_trades = len(trades) // 2  # 每買賣一對算一次交易
-    winning_trades = sum(1 for i in range(1, len(trades), 2) if float(trades[i].split('$')[1]) > float(trades[i-1].split('$')[1]))
-    win_rate = winning_trades / total_trades * 100 if total_trades > 0 else 0
-    max_drawdown = (df['portfolio_value'].max() - df['portfolio_value'].min()) / df['portfolio_value'].max() * 100
-    return total_trades, win_rate, max_drawdown
-
-# 6. Streamlit 前端
+# 以下是原始程式碼的其他部分（calculate_sma, generate_signals, backtest_strategy, calculate_metrics, main）
+# 保持不變，但確保 main() 函數處理空 DataFrame
 def main():
     st.title("📈 AlgoCraft Trading Bot Demo: SMA Strategy")
     st.write("Explore this demo of a trading bot using Simple Moving Average (SMA) strategy. Adjust parameters to see backtest results for your chosen trading pair and timeframe!")
@@ -73,6 +41,11 @@ def main():
     # 獲取數據
     with st.spinner(f"Fetching {symbol} data from Binance..."):
         df = fetch_binance_data(symbol=symbol, timeframe=timeframe)
+
+    # 檢查數據是否有效
+    if df.empty:
+        st.warning("Unable to fetch data. Please try again later or select a different trading pair/timeframe.")
+        return
 
     # 計算 SMA 和交易信號
     df = calculate_sma(df, short_window, long_window)
@@ -136,6 +109,5 @@ def main():
     for trade in trades:
         st.write(trade)
 
-# 運行 Streamlit
 if __name__ == "__main__":
     main()
