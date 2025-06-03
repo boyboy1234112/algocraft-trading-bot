@@ -6,13 +6,21 @@ import plotly.graph_objects as go
 
 # 1. Fetch historical data (using OKX API)
 @st.cache_data
-def fetch_okx_data(symbol='BTC-USDT', timeframe='1h', limit=1000):
+def fetch_okx_data(symbol='BTC-USDT', timeframe='1h', limit=1000, days=365):
     try:
         exchange = ccxt.okx()
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        ohlcv_list = []
+        since = exchange.milliseconds() - days * 24 * 60 * 60 * 1000  # Backtrack specified days
+        while since < exchange.milliseconds():
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+            if not ohlcv:
+                break
+            ohlcv_list.extend(ohlcv)
+            since = ohlcv[-1][0] + 1  # Update since to the last candle's timestamp
+        df = pd.DataFrame(ohlcv_list, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
+        df = df[~df.index.duplicated(keep='last')]  # Remove duplicate timestamps
         return df
     except ccxt.base.errors.ExchangeNotAvailable as e:
         st.error(f"Unable to connect to OKX API: {str(e)}. Please check network or try again later.")
@@ -72,14 +80,15 @@ def main():
     # Sidebar: User input parameters
     st.sidebar.header("Backtest Parameters")
     symbol = st.sidebar.selectbox("Select Trading Pair", ["BTC-USDT", "ETH-USDT", "BNB-USDT"])
-    timeframe = st.sidebar.selectbox("Select Timeframe", ["1h", "4h", "1d"])
-    short_window = st.sidebar.slider("Short SMA Window", 5, 50, 20)
-    long_window = st.sidebar.slider("Long SMA Window", 10, 100, 50)
+    timeframe = st.sidebar.selectbox("Select Timeframe", ["1h (Hourly)", "4h (4-Hour)", "1d (Daily)"])
+    short_window = st.sidebar.slider("Short SMA Window", 5, 50, 10)  # Adjusted default
+    long_window = st.sidebar.slider("Long SMA Window", 10, 100, 30)  # Adjusted default
     initial_cash = st.sidebar.number_input("Initial Capital ($)", 1000, 100000, 10000)
+    days = st.sidebar.slider("Backtest Period (Days)", 30, 730, 365)  # New: Select backtest period
 
     # Fetch data
     with st.spinner(f"Fetching {symbol} data from OKX..."):
-        df = fetch_okx_data(symbol=symbol, timeframe=timeframe)
+        df = fetch_okx_data(symbol=symbol, timeframe=timeframe, days=days)
     
     # Check if data was successfully fetched
     if df is None:
@@ -144,8 +153,10 @@ def main():
 
     # Display trade history
     st.subheader("Trade History")
-    for trade in trades:
-        st.write(trade)
+    if len(trades) > 0:
+        st.dataframe(pd.DataFrame(trades, columns=["Trade Log"]))  # Display trades in a table
+    else:
+        st.write("No trades executed.")
 
 # Run Streamlit
 if __name__ == "__main__":
