@@ -3,6 +3,7 @@ import pandas as pd
 import ccxt
 import plotly.express as px
 import plotly.graph_objects as go
+import time
 
 # 1. Fetch historical data (using OKX API)
 @st.cache_data
@@ -17,16 +18,23 @@ def fetch_okx_data(symbol='BTC-USDT', timeframe='1h', limit=1000, days=365):
                 break
             ohlcv_list.extend(ohlcv)
             since = ohlcv[-1][0] + 1  # Update since to the last candle's timestamp
+            time.sleep(0.1)  # Avoid hitting API rate limits
+        if not ohlcv_list:
+            st.error(f"No data retrieved for {symbol} with timeframe {timeframe}. Please check the trading pair or timeframe.")
+            return None
         df = pd.DataFrame(ohlcv_list, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         df = df[~df.index.duplicated(keep='last')]  # Remove duplicate timestamps
         return df
-    except ccxt.base.errors.ExchangeNotAvailable as e:
-        st.error(f"Unable to connect to OKX API: {str(e)}. Please check network or try again later.")
+    except ccxt.NetworkError as e:
+        st.error(f"Network error connecting to OKX API for {symbol} ({timeframe}): {str(e)}. Please check network or try again later.")
+        return None
+    except ccxt.ExchangeError as e:
+        st.error(f"Exchange error for {symbol} ({timeframe}): {str(e)}. Please verify trading pair or API status.")
         return None
     except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
+        st.error(f"Unexpected error fetching data for {symbol} ({timeframe}): {str(e)}")
         return None
 
 # 2. Calculate Simple Moving Averages (SMA)
@@ -81,17 +89,18 @@ def main():
     st.sidebar.header("Backtest Parameters")
     symbol = st.sidebar.selectbox("Select Trading Pair", ["BTC-USDT", "ETH-USDT", "BNB-USDT"])
     timeframe = st.sidebar.selectbox("Select Timeframe", ["1h (Hourly)", "4h (4-Hour)", "1d (Daily)"])
-    short_window = st.sidebar.slider("Short SMA Window", 5, 50, 10)  # Adjusted default
-    long_window = st.sidebar.slider("Long SMA Window", 10, 100, 30)  # Adjusted default
+    short_window = st.sidebar.slider("Short SMA Window", 5, 50, 10)
+    long_window = st.sidebar.slider("Long SMA Window", 10, 100, 30)
     initial_cash = st.sidebar.number_input("Initial Capital ($)", 1000, 100000, 10000)
-    days = st.sidebar.slider("Backtest Period (Days)", 30, 730, 365)  # New: Select backtest period
+    days = st.sidebar.slider("Backtest Period (Days)", 30, 730, 365)
 
     # Fetch data
     with st.spinner(f"Fetching {symbol} data from OKX..."):
         df = fetch_okx_data(symbol=symbol, timeframe=timeframe, days=days)
     
     # Check if data was successfully fetched
-    if df is None:
+    if df is None or len(df) < max(short_window, long_window):
+        st.error("Insufficient data for backtesting. Please try a different trading pair, timeframe, or increase the backtest period.")
         st.stop()
 
     # Calculate SMA and trading signals
@@ -154,9 +163,15 @@ def main():
     # Display trade history
     st.subheader("Trade History")
     if len(trades) > 0:
-        st.dataframe(pd.DataFrame(trades, columns=["Trade Log"]))  # Display trades in a table
+        st.dataframe(pd.DataFrame(trades, columns=["Trade Log"]))
     else:
         st.write("No trades executed.")
+
+    # Save backtest results
+    if st.button("Save Backtest Results"):
+        df.to_csv(f"backtest_{symbol}_{timeframe.replace(' ', '_')}.csv")
+        pd.DataFrame(trades, columns=["Trade Log"]).to_csv(f"trades_{symbol}_{timeframe.replace(' ', '_')}.csv")
+        st.success("Backtest results saved!")
 
 # Run Streamlit
 if __name__ == "__main__":
