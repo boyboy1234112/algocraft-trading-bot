@@ -8,6 +8,11 @@ import time
 # 1. Fetch historical data (using OKX API)
 @st.cache_data
 def fetch_okx_data(symbol='BTC-USDT', timeframe='1h', limit=1000, days=365):
+    # Validate timeframe
+    valid_timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
+    if timeframe not in valid_timeframes:
+        st.error(f"Invalid timeframe: {timeframe}. Please use one of {valid_timeframes}.")
+        return None
     try:
         exchange = ccxt.okx()
         ohlcv_list = []
@@ -88,11 +93,18 @@ def main():
     # Sidebar: User input parameters
     st.sidebar.header("Backtest Parameters")
     symbol = st.sidebar.selectbox("Select Trading Pair", ["BTC-USDT", "ETH-USDT", "BNB-USDT"])
-    timeframe = st.sidebar.selectbox("Select Timeframe", ["1h (Hourly)", "4h (4-Hour)", "1d (Daily)"])
-    short_window = st.sidebar.slider("Short SMA Window", 5, 50, 10)
-    long_window = st.sidebar.slider("Long SMA Window", 10, 100, 30)
+    # Map display names to actual timeframe values
+    timeframe_options = {
+        "1h (Hourly)": "1h",
+        "4h (4-Hour)": "4h",
+        "1d (Daily)": "1d"
+    }
+    timeframe_display = st.sidebar.selectbox("Select Timeframe", list(timeframe_options.keys()))
+    timeframe = timeframe_options[timeframe_display]  # Get the actual timeframe value
+    short_window = st.sidebar.slider("Short SMA Window", 5, 50, 20)  # Updated default to 20
+    long_window = st.sidebar.slider("Long SMA Window", 10, 100, 50)  # Updated default to 50
     initial_cash = st.sidebar.number_input("Initial Capital ($)", 1000, 100000, 10000)
-    days = st.sidebar.slider("Backtest Period (Days)", 30, 730, 365)
+    days = st.sidebar.slider("Backtest Period (Days)", 30, 730, 183)  # Updated default to 183
 
     # Fetch data
     with st.spinner(f"Fetching {symbol} data from OKX..."):
@@ -169,8 +181,8 @@ def main():
 
     # Save backtest results
     if st.button("Save Backtest Results"):
-        df.to_csv(f"backtest_{symbol}_{timeframe.replace(' ', '_')}.csv")
-        pd.DataFrame(trades, columns=["Trade Log"]).to_csv(f"trades_{symbol}_{timeframe.replace(' ', '_')}.csv")
+        df.to_csv(f"backtest_{symbol}_{timeframe}.csv")
+        pd.DataFrame(trades, columns=["Trade Log"]).to_csv(f"trades_{symbol}_{timeframe}.csv")
         st.success("Backtest results saved!")
 
 # Run Streamlit
